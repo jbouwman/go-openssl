@@ -53,10 +53,10 @@ func get_ssl_ctx_idx() C.int {
 	return ssl_ctx_idx
 }
 
-func newCtx(method *C.SSL_METHOD) (*Ctx, error) {
+func newCtx() (*Ctx, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	ctx := C.SSL_CTX_new(method)
+	ctx := C.SSL_CTX_new(C.X_TLS_method())
 	if ctx == nil {
 		return nil, errorFromErrorQueue()
 	}
@@ -75,32 +75,39 @@ const (
 	TLSv1   SSLVersion = 0x03
 	TLSv1_1 SSLVersion = 0x04
 	TLSv1_2 SSLVersion = 0x05
+	TLSv1_3 SSLVersion = 0x06
 
 	// Make sure to disable SSLv2 and SSLv3 if you use this. SSLv3 is vulnerable
 	// to the "POODLE" attack, and SSLv2 is what, just don't even.
-	AnyVersion SSLVersion = 0x06
+	AnyVersion SSLVersion = 0x07
 )
+
+var SSLVersions = map[SSLVersion]int {
+	SSLv3: C.SSL3_VERSION,
+	TLSv1: C.TLS1_VERSION,
+	TLSv1_1: C.TLS1_1_VERSION,
+	TLSv1_2: C.TLS1_2_VERSION,
+	TLSv1_3: C.TLS1_3_VERSION,
+}
 
 // NewCtxWithVersion creates an SSL context that is specific to the provided
 // SSL version. See http://www.openssl.org/docs/ssl/SSL_CTX_new.html for more.
 func NewCtxWithVersion(version SSLVersion) (*Ctx, error) {
-	var method *C.SSL_METHOD
-	switch version {
-	case SSLv3:
-		method = C.X_SSLv3_method()
-	case TLSv1:
-		method = C.X_TLSv1_method()
-	case TLSv1_1:
-		method = C.X_TLSv1_1_method()
-	case TLSv1_2:
-		method = C.X_TLSv1_2_method()
-	case AnyVersion:
-		method = C.X_SSLv23_method()
+	c, err := newCtx()
+	if err != nil {
+		return c, err
 	}
-	if method == nil {
-		return nil, errors.New("unknown ssl/tls version")
+
+	if version != AnyVersion {
+		cv := C.int(SSLVersions[version])
+		if C.X_SSL_CTX_set_min_proto_version(c.ctx, cv) == 0 {
+			return c, errors.New("SSL_CTX_set_min_proto_version failed")
+		}
+		if C.X_SSL_CTX_set_max_proto_version(c.ctx, cv) == 0 {
+			return c, errors.New("SSL_CTX_set_max_proto_version failed")
+		}
 	}
-	return newCtx(method)
+	return c, err
 }
 
 // NewCtx creates a context that supports any TLS version 1.0 and newer.

@@ -431,6 +431,14 @@ int X_SSL_new_index() {
 	return SSL_get_ex_new_index(0, NULL, NULL, NULL, NULL);
 }
 
+int X_SSL_CTX_set_min_proto_version(SSL_CTX *ctx, int version) {
+	return SSL_CTX_set_min_proto_version(ctx, version);
+}
+
+int X_SSL_CTX_set_max_proto_version(SSL_CTX *ctx, int version) {
+	return SSL_CTX_set_max_proto_version(ctx, version);
+}
+
 int X_SSL_verify_cb(int ok, X509_STORE_CTX* store) {
 	SSL* ssl = (SSL *)X509_STORE_CTX_get_ex_data(store,
 			SSL_get_ex_data_X509_STORE_CTX_idx());
@@ -439,36 +447,8 @@ int X_SSL_verify_cb(int ok, X509_STORE_CTX* store) {
 	return go_ssl_verify_cb_thunk(p, ok, store);
 }
 
-const SSL_METHOD *X_SSLv23_method() {
-	return SSLv23_method();
-}
-
-const SSL_METHOD *X_SSLv3_method() {
-#ifndef OPENSSL_NO_SSL3_METHOD
-	return SSLv3_method();
-#else
-	return NULL;
-#endif
-}
-
-const SSL_METHOD *X_TLSv1_method() {
-	return TLSv1_method();
-}
-
-const SSL_METHOD *X_TLSv1_1_method() {
-#if defined(TLS1_1_VERSION) && !defined(OPENSSL_SYSNAME_MACOSX)
-	return TLSv1_1_method();
-#else
-	return NULL;
-#endif
-}
-
-const SSL_METHOD *X_TLSv1_2_method() {
-#if defined(TLS1_2_VERSION) && !defined(OPENSSL_SYSNAME_MACOSX)
-	return TLSv1_2_method();
-#else
-	return NULL;
-#endif
+const SSL_METHOD *X_TLS_method() {
+	return TLS_method();
 }
 
 int X_SSL_CTX_new_index() {
