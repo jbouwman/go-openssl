@@ -127,7 +127,12 @@ func go_ticket_key_cb_thunk(p unsafe.Pointer, s *C.SSL, key_name *C.uchar,
 		}
 	}()
 
-	ctx := (*Ctx)(p)
+	ref := (*int)(p)
+	ctx, err := findCtx(*ref)
+	if err != nil {
+		return C.int(1)	// check this
+	}
+
 	store := ctx.ticket_store
 	if store == nil {
 		// TODO(jeff): should this be an error condition? it doesn't make sense

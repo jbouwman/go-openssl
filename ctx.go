@@ -38,6 +38,7 @@ var (
 
 type Ctx struct {
 	ctx       *C.SSL_CTX
+	ref       int
 	cert      *Certificate
 	chain     []*Certificate
 	key       PrivateKey
@@ -53,6 +54,32 @@ func get_ssl_ctx_idx() C.int {
 	return ssl_ctx_idx
 }
 
+// To avoid passing Go structs containing C pointers to
+// SSL_CTX_ex_data.
+
+var ctx_mu = &sync.Mutex{}
+var ctx_ref = 0
+var ctx_map = map[int]*Ctx{}
+
+func RecordCtx(ctx *C.SSL_CTX) *Ctx {
+	ctx_mu.Lock()
+	defer ctx_mu.Unlock()
+	c := &Ctx{ctx: ctx, ref: ctx_ref}
+	ctx_map[ctx_ref] = c
+	ctx_ref += 1
+	return c
+}
+
+func findCtx(ref int) (*Ctx, error) {
+	ctx_mu.Lock()
+	defer ctx_mu.Unlock()
+	c := ctx_map[ref]
+	if c == nil {
+		return nil, errors.New("SSL Context not found")
+	}
+	return c, nil
+}
+
 func newCtx() (*Ctx, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -60,8 +87,8 @@ func newCtx() (*Ctx, error) {
 	if ctx == nil {
 		return nil, errorFromErrorQueue()
 	}
-	c := &Ctx{ctx: ctx}
-	C.SSL_CTX_set_ex_data(ctx, get_ssl_ctx_idx(), unsafe.Pointer(c))
+	c := RecordCtx(ctx)
+	C.SSL_CTX_set_ex_data(ctx, get_ssl_ctx_idx(), unsafe.Pointer(&c.ref))
 	runtime.SetFinalizer(c, func(c *Ctx) {
 		C.SSL_CTX_free(c.ctx)
 	})
@@ -437,11 +464,17 @@ func go_ssl_ctx_verify_cb_thunk(p unsafe.Pointer, ok C.int, ctx *C.X509_STORE_CT
 			os.Exit(1)
 		}
 	}()
-	verify_cb := (*Ctx)(p).verify_cb
+
+	ref := (*int)(p)
+	ssl_ctx, err := findCtx(*ref)
+	if err != nil {
+		return C.int(1)	// check this
+	}
+
 	// set up defaults just in case verify_cb is nil
-	if verify_cb != nil {
+	if ssl_ctx.verify_cb != nil {
 		store := &CertificateStoreCtx{ctx: ctx}
-		if verify_cb(ok == 1, store) {
+		if ssl_ctx.verify_cb(ok == 1, store) {
 			ok = 1
 		} else {
 			ok = 0

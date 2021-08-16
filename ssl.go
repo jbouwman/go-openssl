@@ -18,7 +18,9 @@ package openssl
 import "C"
 
 import (
+	"errors"
 	"os"
+	"sync"
 	"unsafe"
 )
 
@@ -40,8 +42,35 @@ func get_ssl_idx() C.int {
 	return ssl_idx
 }
 
+// To avoid passing Go structs containing C pointers to
+// SSL_ex_data.
+
+var ssl_mu = &sync.Mutex{}
+var ssl_ref = 0
+var ssl_map = map[int]*SSL{}
+
+func RecordSSL(ssl *C.SSL) *SSL {
+	ssl_mu.Lock()
+	defer ssl_mu.Unlock()
+	c := &SSL{ssl: ssl, ref: ssl_ref}
+	ssl_map[ssl_ref] = c
+	ssl_ref += 1
+	return c
+}
+
+func findSSL(ref int) (*SSL, error) {
+	ssl_mu.Lock()
+	defer ssl_mu.Unlock()
+	c := ssl_map[ref]
+	if c == nil {
+		return nil, errors.New("SSL not found")
+	}
+	return c, nil
+}
+
 type SSL struct {
 	ssl       *C.SSL
+	ref       int
 	verify_cb VerifyCallback
 }
 
@@ -53,7 +82,14 @@ func go_ssl_verify_cb_thunk(p unsafe.Pointer, ok C.int, ctx *C.X509_STORE_CTX) C
 			os.Exit(1)
 		}
 	}()
-	verify_cb := (*SSL)(p).verify_cb
+
+	ref := (*int)(p)
+	ssl, err := findSSL(*ref)
+	if err != nil {
+		return C.int(0)	// check this
+	}
+	verify_cb := ssl.verify_cb
+	
 	// set up defaults just in case verify_cb is nil
 	if verify_cb != nil {
 		store := &CertificateStoreCtx{ctx: ctx}
@@ -159,12 +195,16 @@ func sni_cb_thunk(p unsafe.Pointer, con *C.SSL, ad unsafe.Pointer, arg unsafe.Po
 		}
 	}()
 
-	sni_cb := (*Ctx)(p).sni_cb
+	ref := (*int)(p)
+	ctx, err := findCtx(*ref)
+	if err != nil {
+		return C.int(0)	// check this
+	}
 
-	s := &SSL{ssl: con}
+	s := RecordSSL(con)
 	// This attaches a pointer to our SSL struct into the SNI callback.
-	C.SSL_set_ex_data(s.ssl, get_ssl_idx(), unsafe.Pointer(s))
+	C.SSL_set_ex_data(s.ssl, get_ssl_idx(), unsafe.Pointer(&s.ref))
 
 	// Note: this is ctx.sni_cb, not C.sni_cb
-	return C.int(sni_cb(s))
+	return C.int(ctx.sni_cb(s))
 }

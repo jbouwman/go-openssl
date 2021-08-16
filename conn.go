@@ -136,8 +136,8 @@ func newConn(conn net.Conn, ctx *Ctx) (*Conn, error) {
 	// the ssl object takes ownership of these objects now
 	C.SSL_set_bio(ssl, into_ssl_cbio, from_ssl_cbio)
 
-	s := &SSL{ssl: ssl}
-	C.SSL_set_ex_data(s.ssl, get_ssl_idx(), unsafe.Pointer(s))
+	s := RecordSSL(ssl)
+	C.SSL_set_ex_data(s.ssl, get_ssl_idx(), unsafe.Pointer(&s.ref))
 
 	c := &Conn{
 		SSL: s,
