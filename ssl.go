@@ -20,6 +20,7 @@ import "C"
 import (
 	"errors"
 	"os"
+	"runtime"
 	"sync"
 	"unsafe"
 )
@@ -52,20 +53,24 @@ var ssl_map = map[int]*SSL{}
 func RecordSSL(ssl *C.SSL) *SSL {
 	ssl_mu.Lock()
 	defer ssl_mu.Unlock()
-	c := &SSL{ssl: ssl, ref: ssl_ref}
-	ssl_map[ssl_ref] = c
+	s := &SSL{ssl: ssl, ref: ssl_ref}
+	C.SSL_set_ex_data(ssl, get_ssl_idx(), unsafe.Pointer(&s.ref))
+	runtime.SetFinalizer(s, func(s *SSL) {
+		delete(ssl_map, s.ref)
+	})
+	ssl_map[ssl_ref] = s
 	ssl_ref += 1
-	return c
+	return s
 }
 
 func findSSL(ref int) (*SSL, error) {
 	ssl_mu.Lock()
 	defer ssl_mu.Unlock()
-	c := ssl_map[ref]
-	if c == nil {
+	s := ssl_map[ref]
+	if s == nil {
 		return nil, errors.New("SSL not found")
 	}
-	return c, nil
+	return s, nil
 }
 
 type SSL struct {
@@ -83,20 +88,18 @@ func go_ssl_verify_cb_thunk(p unsafe.Pointer, ok C.int, ctx *C.X509_STORE_CTX) C
 		}
 	}()
 
+	ok = 0
 	ref := (*int)(p)
 	ssl, err := findSSL(*ref)
 	if err != nil {
-		return C.int(0)	// check this
-	}
-	verify_cb := ssl.verify_cb
-	
-	// set up defaults just in case verify_cb is nil
-	if verify_cb != nil {
-		store := &CertificateStoreCtx{ctx: ctx}
-		if verify_cb(ok == 1, store) {
-			ok = 1
-		} else {
-			ok = 0
+		verify_cb := ssl.verify_cb
+
+		// set up defaults just in case verify_cb is nil
+		if verify_cb != nil {
+			store := &CertificateStoreCtx{ctx: ctx}
+			if verify_cb(ok == 1, store) {
+				ok = 1
+			}
 		}
 	}
 	return ok
@@ -198,12 +201,10 @@ func sni_cb_thunk(p unsafe.Pointer, con *C.SSL, ad unsafe.Pointer, arg unsafe.Po
 	ref := (*int)(p)
 	ctx, err := findCtx(*ref)
 	if err != nil {
-		return C.int(0)	// check this
+		return C.int(0)
 	}
 
 	s := RecordSSL(con)
-	// This attaches a pointer to our SSL struct into the SNI callback.
-	C.SSL_set_ex_data(s.ssl, get_ssl_idx(), unsafe.Pointer(&s.ref))
 
 	// Note: this is ctx.sni_cb, not C.sni_cb
 	return C.int(ctx.sni_cb(s))

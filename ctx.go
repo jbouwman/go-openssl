@@ -65,6 +65,11 @@ func RecordCtx(ctx *C.SSL_CTX) *Ctx {
 	ctx_mu.Lock()
 	defer ctx_mu.Unlock()
 	c := &Ctx{ctx: ctx, ref: ctx_ref}
+	C.SSL_CTX_set_ex_data(ctx, get_ssl_ctx_idx(), unsafe.Pointer(&c.ref))
+	runtime.SetFinalizer(c, func(c *Ctx) {
+		delete(ctx_map, c.ref)
+		C.SSL_CTX_free(c.ctx)
+	})
 	ctx_map[ctx_ref] = c
 	ctx_ref += 1
 	return c
@@ -88,10 +93,6 @@ func newCtx() (*Ctx, error) {
 		return nil, errorFromErrorQueue()
 	}
 	c := RecordCtx(ctx)
-	C.SSL_CTX_set_ex_data(ctx, get_ssl_ctx_idx(), unsafe.Pointer(&c.ref))
-	runtime.SetFinalizer(c, func(c *Ctx) {
-		C.SSL_CTX_free(c.ctx)
-	})
 	return c, nil
 }
 
@@ -109,9 +110,9 @@ const (
 	AnyVersion SSLVersion = 0x07
 )
 
-var SSLVersions = map[SSLVersion]int {
-	SSLv3: C.SSL3_VERSION,
-	TLSv1: C.TLS1_VERSION,
+var SSLVersions = map[SSLVersion]int{
+	SSLv3:   C.SSL3_VERSION,
+	TLSv1:   C.TLS1_VERSION,
 	TLSv1_1: C.TLS1_1_VERSION,
 	TLSv1_2: C.TLS1_2_VERSION,
 	TLSv1_3: C.TLS1_3_VERSION,
@@ -468,7 +469,8 @@ func go_ssl_ctx_verify_cb_thunk(p unsafe.Pointer, ok C.int, ctx *C.X509_STORE_CT
 	ref := (*int)(p)
 	ssl_ctx, err := findCtx(*ref)
 	if err != nil {
-		return C.int(1)	// check this
+		ok = 0
+		return ok
 	}
 
 	// set up defaults just in case verify_cb is nil

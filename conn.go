@@ -137,7 +137,6 @@ func newConn(conn net.Conn, ctx *Ctx) (*Conn, error) {
 	C.SSL_set_bio(ssl, into_ssl_cbio, from_ssl_cbio)
 
 	s := RecordSSL(ssl)
-	C.SSL_set_ex_data(s.ssl, get_ssl_idx(), unsafe.Pointer(&s.ref))
 
 	c := &Conn{
 		SSL: s,
