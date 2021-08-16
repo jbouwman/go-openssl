@@ -88,18 +88,21 @@ func go_ssl_verify_cb_thunk(p unsafe.Pointer, ok C.int, ctx *C.X509_STORE_CTX) C
 		}
 	}()
 
-	ok = 0
 	ref := (*int)(p)
 	ssl, err := findSSL(*ref)
 	if err != nil {
-		verify_cb := ssl.verify_cb
+		return C.int(0)
+	}
 
-		// set up defaults just in case verify_cb is nil
-		if verify_cb != nil {
-			store := &CertificateStoreCtx{ctx: ctx}
-			if verify_cb(ok == 1, store) {
-				ok = 1
-			}
+	verify_cb := ssl.verify_cb
+
+	// set up defaults just in case verify_cb is nil
+	if verify_cb != nil {
+		store := &CertificateStoreCtx{ctx: ctx}
+		if verify_cb(ok == 1, store) {
+			ok = 1
+		} else {
+			ok = 0
 		}
 	}
 	return ok
